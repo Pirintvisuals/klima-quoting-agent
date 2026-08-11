@@ -5,6 +5,11 @@
   const assetsUrl = config.assetsUrl || ""; // e.g. "https://your-app.vercel.app"
   const PHONE = "+36 30 260 57 56";
   const BRAND = "Kecskemét Klíma";
+  // How long the whole flow takes, in seconds. Drives the greeting copy, the
+  // teaser bubbles and the countdown in the progress bar — change it in ONE
+  // place. 15 is the honest number: one button tap plus four short typed
+  // fields (név, e-mail, telefon, irányítószám).
+  const QUOTE_SECONDS = 15;
 
   let chatOpen = false;
   let chatWindow = null;
@@ -29,6 +34,8 @@
     close: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
     check: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
     write: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+    clock: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>',
+    help: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4"/><line x1="12" y1="17.5" x2="12" y2="17.5"/></svg>',
   };
 
   function logoSrc() {
@@ -66,15 +73,15 @@
     // Rotating teaser questions — cycled to spark engagement and show what the
     // assistant can actually do. No emojis. Hungarian, air-conditioning focused.
     const TEASERS = [
-      "Üdv! Kérjen pár kattintással ingyenes árajánlatot klímára.",
-      "Mennyibe kerül egy klíma felszerelve? Kérdezzen most.",
-      "Mekkora szobába kell a klíma? Számoljunk árat egy perc alatt.",
-      "Melyik klíma illik a szobájához? Segítek kiválasztani.",
-      "Klíma ára telepítéssel együtt — nézze meg most.",
+      `Klíma ára ${QUOTE_SECONDS} másodperc alatt – egy kérdés, és kész.`,
+      "Kérdezzen bátran! Árakról, márkákról, garanciáról – bármiről.",
+      `Mennyibe kerül egy klíma felszerelve? ${QUOTE_SECONDS} mp és megtudja.`,
+      "Nem hűt eléggé a klímája? Írjon, azonnal válaszolok.",
+      `Egy kérdés, ${QUOTE_SECONDS} másodperc, és látja az árat.`,
       "Kérdése van a klímáról? Írjon, azonnal válaszolok.",
-      "Nem hűt eléggé a klímája? Kérdezzen bátran.",
-      "Klímatisztítás, javítás vagy új klíma? Segítek.",
-      "Ingyenes, kötelezettség nélküli árajánlat, kezdjük el!",
+      "Klímatisztítás, javítás vagy új klíma? Kérdezzen nyugodtan.",
+      "Milyen márkákat szerelünk? Hány év a garancia? Kérdezze meg!",
+      `Ingyenes árajánlat, kötelezettség nélkül – kb. ${QUOTE_SECONDS} mp.`,
     ];
     let teaserIdx = 0;
     let teaserTimer = null;
@@ -213,8 +220,11 @@
     const progress = document.createElement("div");
     progress.className = "faq-progress";
     progress.innerHTML =
+      `<span class="faq-progress-clock" aria-hidden="true">${ICON.clock}</span>` +
       '<div class="faq-progress-track"><div class="faq-progress-fill"></div></div>' +
-      '<span class="faq-progress-label"></span>';
+      // Seeded so the time promise is on screen from the very first frame,
+      // before the first backend response arrives.
+      `<span class="faq-progress-label">kb. ${QUOTE_SECONDS} mp az egész</span>`;
     progressBarEl = progress;
     progressFillEl = progress.querySelector(".faq-progress-fill");
     progressLabelEl = progress.querySelector(".faq-progress-label");
@@ -256,7 +266,8 @@
     // Persistent hint below messages reminding visitors they can ask freely
     const questionHint = document.createElement("div");
     questionHint.className = "faq-question-hint";
-    questionHint.textContent = "Kérdezzen bátran – pl. árakról, márkákról, garanciáról, karbantartásról";
+    questionHint.innerHTML =
+      `${ICON.help}<span><strong>Bármikor kérdezhet</strong> – árakról, márkákról, garanciáról, karbantartásról. Csak írja be ide!</span>`;
 
     const inputWrap = document.createElement("div");
     inputWrap.className = "faq-input-wrap";
@@ -274,21 +285,40 @@
 
     if (!started) {
       started = true;
-      addMessage("bot", `Üdvözlöm a **${BRAND}** árajánló asszisztensénél! Néhány kérdés alapján elkészítem az **előzetes árajánlatát**.\n\n**Bármit megkérdezhet** – árakról, márkákról, garanciáról, karbantartásról vagy bármi másról!`);
-      // Clickable example questions so visitors see they can ask freely
+      addMessage("bot", `Üdvözlöm a **${BRAND}** árajánló asszisztensénél! Egyetlen kérdés alapján elkészítem az **előzetes árajánlatát** – az egész **kb. ${QUOTE_SECONDS} másodperc**.`);
+
+      // "You can ask me anything" block — a labelled row of clickable example
+      // questions. It deliberately SURVIVES the first bot turn (clearChips
+      // skips it), so the visitor sees the answer buttons and the "ask me
+      // something instead" option side by side. It only disappears once they
+      // actually send a message of their own.
+      const askBlock = document.createElement("div");
+      askBlock.className = "faq-ask-block";
+
+      const askLabel = document.createElement("div");
+      askLabel.className = "faq-ask-label";
+      askLabel.innerHTML = `${ICON.help}<span><strong>Bármit kérdezhet</strong> – akár most rögtön, akár menet közben:</span>`;
+
       const exWrap = document.createElement("div");
       exWrap.className = "faq-chips faq-example-questions";
+      // Kept SHORT on purpose: long questions wrap to two lines each and the
+      // block then swallows half the chat window, pushing the actual question
+      // out of view. These fit two-per-row.
       const examples = [
-        "Mennyibe kerül egy klíma telepítése?",
-        "Mennyi ideig tart a telepítés?",
-        "Milyen márkákat szereltek?",
+        "Meddig tart?",
+        "Milyen márkák?",
+        "Hány év garancia?",
+        "Ingyenes felmérés?",
       ];
       examples.forEach((q) => {
         const chip = makeChip(q);
-        chip.onclick = () => { exWrap.remove(); sendMessage(q); };
+        chip.onclick = () => sendMessage(q);
         exWrap.appendChild(chip);
       });
-      messagesContainer.appendChild(exWrap);
+
+      askBlock.appendChild(askLabel);
+      askBlock.appendChild(exWrap);
+      messagesContainer.appendChild(askBlock);
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
       sendMessage("Szeretnék árajánlatot klíma telepítésére.", true);
     }
@@ -313,8 +343,20 @@
     return html;
   }
 
+  // Removes the answer buttons only. The example-question chips are explicitly
+  // spared so the "you can ask me anything" invitation stays on screen next to
+  // the first question instead of being wiped by the kickoff turn.
   function clearChips() {
-    messagesContainer.querySelectorAll(".faq-chips").forEach((c) => c.remove());
+    messagesContainer
+      .querySelectorAll(".faq-chips:not(.faq-example-questions)")
+      .forEach((c) => c.remove());
+  }
+
+  // Drop the whole "ask me anything" block — called once the visitor has sent
+  // a message of their own, at which point the invitation has done its job.
+  function clearAskBlock() {
+    const b = messagesContainer.querySelector(".faq-ask-block");
+    if (b) b.remove();
   }
 
   // Switch the composer between "pick a button" mode (chips shown) and
@@ -327,7 +369,7 @@
     if (inputElement) {
       inputElement.placeholder = typeMode
         ? "Írja ide a válaszát…"
-        : "Válasszon fent, vagy írjon ide…";
+        : "Válasszon fent – vagy kérdezzen bátran…";
       if (typeMode) setTimeout(() => inputElement && inputElement.focus(), 80);
     }
   }
@@ -442,15 +484,22 @@
     if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
   }
 
-  // Update the progress bar from the backend's answered/total counts.
+  // Update the progress bar from the backend's answered/total counts. The label
+  // shows the TIME LEFT rather than a percentage — the filled bar already
+  // communicates progress, and "still only ~9 seconds" is far more persuasive
+  // than "40%" for someone deciding whether to bother finishing.
   function updateProgress(done, total) {
     if (!progressFillEl || !total) return;
     const pct = Math.max(0, Math.min(100, Math.round((done / total) * 100)));
     progressFillEl.style.width = pct + "%";
-    if (progressLabelEl) progressLabelEl.textContent = pct + "%";
+    const complete = done >= total;
+    if (progressLabelEl) {
+      const left = Math.max(1, Math.ceil((QUOTE_SECONDS * (total - done)) / total));
+      progressLabelEl.textContent = complete ? "Kész!" : `még kb. ${left} mp`;
+    }
     if (progressBarEl) {
       progressBarEl.classList.add("visible");
-      progressBarEl.classList.toggle("complete", done >= total);
+      progressBarEl.classList.toggle("complete", complete);
     }
   }
 
@@ -461,7 +510,7 @@
     if (!text) return;
 
     clearChips();
-    if (!hidden) addMessage("user", text);
+    if (!hidden) { clearAskBlock(); addMessage("user", text); }
     if (presetText === undefined) inputElement.value = "";
     sending = true;
 
