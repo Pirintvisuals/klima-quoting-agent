@@ -31,7 +31,7 @@
   // No PII leaves the page: inputs are masked in replays, the customer's own
   // bubbles are masked, and events only ever carry field NAMES / counts —
   // never what was typed.
-  const POSTHOG_KEY = config.posthogKey || "phc_nroFe9H8K9hbVENBqcRRrWW9GXxoyVZhSomy3U8Zhu4P";
+  const POSTHOG_KEY = config.posthogKey || "phc_v8Kz9YKBCizrjV3vLzRxdiqvikGJpYy4FMET92Z8htpP";
   const POSTHOG_HOST = config.posthogHost || "https://eu.i.posthog.com";
   const CLIENT_ID = config.client || "klima-kecskemet";
   const WIDGET_VERSION = "2026-09-17";
