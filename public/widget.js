@@ -25,6 +25,105 @@
 
   let container = null;
 
+  // --- Analytics (PostHog) -------------------------------------------------
+  // Same PostHog project as the NM Bau widget; every event carries a `client`
+  // super-property so one dashboard splits the numbers per widget.
+  // No PII leaves the page: inputs are masked in replays, the customer's own
+  // bubbles are masked, and events only ever carry field NAMES / counts —
+  // never what was typed.
+  const POSTHOG_KEY = config.posthogKey || "phc_nroFe9H8K9hbVENBqcRRrWW9GXxoyVZhSomy3U8Zhu4P";
+  const POSTHOG_HOST = config.posthogHost || "https://eu.i.posthog.com";
+  const CLIENT_ID = config.client || "klima-kecskemet";
+  const WIDGET_VERSION = "2026-09-17";
+  const SESSION_REPLAY = config.sessionReplay !== false;
+
+  let filledFields = [];   // field names answered so far, in the order they were answered
+  let lastField = null;    // most recently answered field -> "where they stopped"
+  let lastProgress = 0, lastProgressTotal = 0;
+  let quoteDone = false;
+  let turns = 0;           // messages the customer sent (typed or clicked)
+
+  function track(event, props, options) {
+    try {
+      if (window.posthog && typeof window.posthog.capture === "function") {
+        window.posthog.capture(event, props || {}, options);
+      }
+    } catch (e) {}
+  }
+
+  function initAnalytics() {
+    if (!POSTHOG_KEY) return;
+    if (window.posthog && window.posthog.__loaded) return; // host page already runs PostHog
+    !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug getPageViewId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+    try {
+      window.posthog.init(POSTHOG_KEY, {
+        api_host: POSTHOG_HOST,
+        capture_pageview: false, // embedded widget, not a page view
+        autocapture: false,      // only our own named events
+        disable_session_recording: !SESSION_REPLAY,
+        session_recording: {
+          maskAllInputs: true,
+          maskTextSelector: ".faq-msg.user .faq-bubble, .ph-no-capture",
+        },
+      });
+      window.posthog.register({
+        client: CLIENT_ID,
+        widget_version: WIDGET_VERSION,
+        page: location.pathname,
+      });
+    } catch (e) {}
+  }
+
+  // Compare the carried answer-state before/after a turn and emit one
+  // question_answered per newly filled field (names only, never values).
+  function noteStateChange(prevState, data) {
+    const isFilled = (s, k) => s && s[k] != null && String(s[k]).trim() !== "";
+    const newly = Object.keys(convState || {}).filter(
+      (k) => isFilled(convState, k) && !isFilled(prevState, k) && filledFields.indexOf(k) === -1
+    );
+    if (typeof data.progress === "number" && typeof data.progressTotal === "number") {
+      lastProgress = data.progress;
+      lastProgressTotal = data.progressTotal;
+    }
+    newly.forEach((field) => {
+      filledFields.push(field);
+      lastField = field;
+      track("question_answered", {
+        field,
+        step: filledFields.length,
+        answered: lastProgress,
+        total: lastProgressTotal,
+      });
+    });
+    // Customer sent something but no field got filled: usually an off-script
+    // question (price, brands...), sometimes an answer the bot could not read.
+    if (!newly.length && !data.lead) track("message_unmatched", { after_field: lastField, answered: lastProgress });
+  }
+
+  function funnelSnapshot() {
+    return {
+      last_field: lastField,
+      fields_answered: filledFields.length,
+      answered: lastProgress,
+      total: lastProgressTotal,
+      turns,
+      completed: quoteDone,
+    };
+  }
+
+  // Tab closed / navigated away: the most reliable "where did they cut off".
+  let leftSent = false;
+  function onLeave() {
+    if (leftSent || !started) return;
+    leftSent = true;
+    track("widget_left", funnelSnapshot(), { transport: "sendBeacon" });
+  }
+  window.addEventListener("pagehide", onLeave);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") onLeave();
+    else leftSent = false; // came back: allow a fresh snapshot next time
+  });
+
   // --- Inline SVG icons (no emojis used as UI icons) ---
   const ICON = {
     chat: '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
@@ -150,6 +249,7 @@
         if (w) { w.style.display = "none"; w.classList.remove("closing"); }
       }, 180);
       chatOpen = false;
+      track("chat_closed", funnelSnapshot());
       if (launcher) launcher.classList.remove("active");
     } else {
       if (tooltip) {
@@ -168,6 +268,7 @@
         setTimeout(() => inputElement && inputElement.focus(), 120);
       }
       chatOpen = true;
+      track("chat_opened", { turns });
       if (launcher) launcher.classList.add("active");
     }
   }
@@ -285,6 +386,7 @@
 
     if (!started) {
       started = true;
+      track("quote_started");
       addMessage("bot", `Üdvözlöm a **${BRAND}** árajánló asszisztensénél! Egyetlen kérdés alapján elkészítem az **előzetes árajánlatát** – az egész **kb. ${QUOTE_SECONDS} másodperc**.`);
 
       // "You can ask me anything" block — a labelled row of clickable example
@@ -406,11 +508,12 @@
     yes.type = "button";
     yes.className = "faq-chip faq-chip-primary";
     yes.innerHTML = `${ICON.mail}<span>Kérem e-mailben is</span>`;
-    yes.onclick = () => { clearChips(); requestEmail(); };
+    yes.onclick = () => { clearChips(); track("email_requested"); requestEmail(); };
 
     const no = makeChip("Köszönöm, nem");
     no.onclick = () => {
       clearChips();
+      track("email_declined");
       addMessage("bot", "Rendben, köszönjük a megkeresést! Hamarosan keressük. Ha sürgős, hívjon: " + PHONE);
     };
 
@@ -515,6 +618,9 @@
     sending = true;
 
     conversationHistory.push({ role: "user", content: text });
+    if (!hidden) { turns++; track("message_sent", { via: presetText !== undefined ? "chip" : "typed", after_field: lastField }); }
+    let prevState = {};
+    try { prevState = Object.assign({}, convState); } catch (e) {}
     addThinking();
 
     try {
@@ -527,6 +633,7 @@
       removeThinking();
 
       if (!res.ok) {
+        track("widget_error", { kind: "http", status: res.status, after_field: lastField });
         addMessage("bot", "Elnézést, hiba történt. Kérjük, próbálja újra később.");
         sending = false;
         return;
@@ -534,6 +641,15 @@
 
       const data = await res.json();
       if (data.state && typeof data.state === "object") convState = data.state;
+      // Analytics only - wrapped so it can never interrupt the quote itself.
+      try {
+        if (!hidden) noteStateChange(prevState, data);
+        if (data.lead && !quoteDone) {
+          quoteDone = true;
+          const qs = data.lead.quote || {};
+          track("quote_completed", { fields_answered: filledFields.length, turns, quote_low: qs.low, quote_high: qs.high, quote_total: qs.total });
+        }
+      } catch (e) {}
       if (typeof data.progress === "number" && typeof data.progressTotal === "number") {
         updateProgress(data.progress, data.progressTotal);
       }
@@ -559,6 +675,7 @@
       }
     } catch (err) {
       console.error(err);
+      track("widget_error", { kind: "network", after_field: lastField });
       removeThinking();
       addMessage("bot", "Elnézést, nem sikerült kapcsolódni a szerverhez.");
     } finally {
@@ -569,6 +686,8 @@
   function init() {
     injectStyles();
     createLauncher();
+    initAnalytics();
+    track("widget_loaded");
   }
 
   if (document.readyState === "loading") {
